@@ -489,7 +489,7 @@ namespace AlibabaCloud.OSS.V2.Internal
                 paths.Add(input.Key.UrlEncodePath());
             }
 
-            return $"{host}/{paths.JoinToString("/")}";
+            return $"{host}/{paths.JoinToString('/')}";
         }
 
         private static string CombineQueryString(IDictionary<string, string>? parameters)
@@ -505,14 +505,14 @@ namespace AlibabaCloud.OSS.V2.Internal
             foreach (var p in parameters)
             {
                 if (!isFirst)
-                    queryString.Append("&");
+                    queryString.Append('&');
 
                 isFirst = false;
 
                 queryString.Append(p.Key.UrlEncode());
 
                 if (!string.IsNullOrEmpty(p.Value))
-                    queryString.Append("=").Append(p.Value.UrlEncode());
+                    _ = queryString.Append("=").Append(WebUtility.UrlEncode(p.Value));
             }
 
             return queryString.ToString();

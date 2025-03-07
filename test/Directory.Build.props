@@ -6,7 +6,7 @@
         <TargetFrameworks>net48;net8.0;net9.0</TargetFrameworks>
         <Nullable>disable</Nullable>
         <NoWarn>xUnit1033</NoWarn>
-        <LangVersion>preview</LangVersion>
+        <LangVersion>latest</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <VSTestLogger>trx%3bLogFileName=$(MSBuildProjectName).trx</VSTestLogger>
         <VSTestResultsDirectory>$(RepoRoot)/test-results/$(TargetFramework)</VSTestResultsDirectory>

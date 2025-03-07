@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using AlibabaCloud.OSS.V2.Extensions;
@@ -17,13 +16,25 @@ namespace AlibabaCloud.OSS.V2.Signer
 
         public void Sign(SigningContext signingContext)
         {
-            if (signingContext.Request == null) throw new ArgumentException("signingContext.Request is null");
+#if NET6_0_OR_GREATER
+            ArgumentNullException.ThrowIfNull(signingContext.Request);
+            ArgumentNullException.ThrowIfNull(signingContext.Credentials);
+            ArgumentNullException.ThrowIfNull(signingContext.Region);
+            ArgumentNullException.ThrowIfNull(signingContext.Product);
+#else
+            ThrowIfNull(signingContext.Request, nameof(signingContext.Request));
+            ThrowIfNull(signingContext.Credentials, nameof(signingContext.Credentials));
+            ThrowIfNull(signingContext.Region, nameof(signingContext.Region));
+            ThrowIfNull(signingContext.Product, nameof(signingContext.Product));
 
-            if (signingContext.Credentials == null) throw new ArgumentException("signingContext.Credentials is null");
-
-            if (signingContext.Region == null) throw new ArgumentException("signingContext.Region is null");
-
-            if (signingContext.Product == null) throw new ArgumentException("signingContext.Product is null");
+            static void ThrowIfNull(object? arg, string paramName)
+            {
+                if (arg is null)
+                {
+                    throw new ArgumentNullException($"{nameof(signingContext)}.{paramName}");
+                }
+            }
+#endif
 
             if (signingContext.AuthMethodQuery)
                 AuthQuery(signingContext);
@@ -65,14 +76,12 @@ namespace AlibabaCloud.OSS.V2.Signer
             parameters.Add("x-oss-credential", $"{credentials.AccessKeyId}/{scope}");
 
             if (additionalHeaders.Count > 0)
-                parameters.Add("x-oss-additional-headers", additionalHeaders.JoinToString(";"));
+                parameters.Add("x-oss-additional-headers", additionalHeaders.JoinToString(':'));
 
             // update query 
-            var queryStr = parameters
-                .Select(
-                    x => x.Value.IsEmpty() ? x.Key.UrlEncode() : x.Key.UrlEncode() + "=" + x.Value.UrlEncode()
-                )
-                .JoinToString("&");
+            StringBuilder sb = new(64);
+            AppendAsQueryUrl(sb, parameters, encoded: false);
+            var queryStr = sb.ToString();
             request.RequestUri = request.RequestUri.AppendToQuery(queryStr);
 
             // CanonicalRequest
@@ -150,7 +159,7 @@ namespace AlibabaCloud.OSS.V2.Signer
             // Credential
             var sb = new StringBuilder();
             sb.AppendFormat("OSS4-HMAC-SHA256 Credential={0}/{1}", credentials.AccessKeyId, scope);
-            if (additionalHeaders.Count > 0) sb.AppendFormat(",AdditionalHeaders={0}", additionalHeaders.JoinToString(";"));
+            if (additionalHeaders.Count > 0) sb.AppendFormat(",AdditionalHeaders={0}", additionalHeaders.JoinToString(';'));
             sb.AppendFormat(",Signature={0}", signature);
 
             request.Headers["Authorization"] = sb.ToString();
@@ -181,7 +190,7 @@ namespace AlibabaCloud.OSS.V2.Signer
         private static string ResourcePath(string? bucket, string? key)
         {
             var resourcePath = "/" + (bucket ?? string.Empty) + (key != null ? "/" + key : "");
-            if (bucket != null && key == null) resourcePath = resourcePath + "/";
+            if (bucket != null && key == null) resourcePath += "/";
             return resourcePath;
         }
 
@@ -212,44 +221,75 @@ namespace AlibabaCloud.OSS.V2.Signer
             if (request.RequestUri.Query.IsNotEmpty())
             {
                 var query = request.RequestUri.Query;
-                if (query.StartsWith("?")) query = query.Substring(1);
 
-                foreach (var param in query.Split(new char[] { '&' }, StringSplitOptions.RemoveEmptyEntries))
+#if NET9_0_OR_GREATER
+                // Task the case "?a=1&b&c=&d=1=2=3" for reference.
+                var querySpan = query.StartsWith('?') ? query.AsSpan(1) : query.AsSpan();
+                Span<Range> rangeBuffer = stackalloc Range[3];
+                foreach (var range in querySpan.Split('&'))
                 {
-                    var parts = param.Split(new char[] { '=' }, 2);
+                    var pairSpan = querySpan[range];
+                    if (pairSpan.IsEmpty)
+                    {
+                        continue;
+                    }
+                    var partCount = pairSpan.Split(rangeBuffer, '=');
+                    switch (partCount)
+                    {
+                        case 1:
+                            sortedParameters.Add(new(pairSpan[rangeBuffer[0]]), string.Empty);
+                            break;
+                        case 2:
+                            sortedParameters.Add(new(pairSpan[rangeBuffer[0]]), new(pairSpan[rangeBuffer[1]]));
+                            break;
+                        default:
+                            // It should be impossible to get here. Shall we throw an exception?
+                            // Take `d=1=2=3` for example to explain why the length of rangeBuffer is 3:
+                            // the output will be `[d, 1, 2=3]` if the length is 3;
+                            // and the output will be `[d, 1=2=3]` if the length is 2.
+                            // Currently we just follow the same logic(which picks the former 2 elements) as the logic in other .NET versions.
+                            sortedParameters.Add(new(pairSpan[rangeBuffer[0]]), new(pairSpan[rangeBuffer[1]]));
+                            break;
+                    }
+                }
+#elif NETCOREAPP2_0_OR_GREATER
+                if (query.StartsWith('?')) query = query.Substring(1);
+
+                foreach (var param in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var parts = param.Split('=', 2);
                     sortedParameters.Add(parts[0], parts.Length == 1 ? "" : parts[1]);
                 }
+#else
+                if (query.StartsWith("?", StringComparison.Ordinal)) query = query.Substring(1);
+
+                foreach (var param in query.Split(['&'], StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var parts = param.Split(['='], 2);
+                    sortedParameters.Add(parts[0], parts.Length == 1 ? "" : parts[1]);
+                }
+#endif
             }
 
-            var sb = new StringBuilder();
-
-            foreach (var p in sortedParameters)
-            {
-                if (sb.Length > 0)
-                    sb.Append("&");
-                sb.AppendFormat("{0}", p.Key);
-
-                if (p.Value.Length > 0)
-                    sb.AppendFormat("={0}", p.Value);
-            }
-
-            var canonicalQueryString = sb.ToString();
+            var strBuilder = new StringBuilder();
+            AppendAsQueryUrl(strBuilder, sortedParameters, encoded: true);
+            var canonicalQueryString = strBuilder.ToString();
 
             var canonicalHeaderString = CanonicalizeHeaders(headers, additionalHeaders);
 
             // Additional Headers
-            var additionalHeadersString = additionalHeaders.JoinToString(";");
+            var additionalHeadersString = additionalHeaders.JoinToString(';');
 
             var hashBody = CanonicalizeBodyHash(headers);
 
-            var canonicalRequest = new StringBuilder();
-            canonicalRequest.AppendFormat("{0}\n", httpMethod);
-            canonicalRequest.AppendFormat("{0}\n", canonicalUri);
-            canonicalRequest.AppendFormat("{0}\n", canonicalQueryString);
-            canonicalRequest.AppendFormat("{0}\n", canonicalHeaderString);
-            canonicalRequest.AppendFormat("{0}\n", additionalHeadersString);
-            canonicalRequest.AppendFormat("{0}", hashBody);
-
+            strBuilder.Clear();
+            var canonicalRequest = strBuilder
+                .Append(httpMethod).Append('\n') // DO NOT use AppendLine(), because it might add \r\n in some OS environments.
+                .Append(canonicalUri).Append('\n')
+                .Append(canonicalQueryString).Append('\n')
+                .Append(canonicalHeaderString).Append('\n')
+                .Append(additionalHeadersString).Append('\n')
+                .Append(hashBody);
             return canonicalRequest.ToString();
         }
 
@@ -296,20 +336,20 @@ namespace AlibabaCloud.OSS.V2.Signer
             List<string>? additionalHeaders
         )
         {
-            var keys = new List<string>();
+            if (additionalHeaders is not { Count: > 0 } || headers.Count == 0)
+            {
+                return [];
+            }
 
-            if (additionalHeaders == null ||
-                additionalHeaders.Count == 0 ||
-                headers.Count == 0)
-                return keys;
+            var keys = new List<string>();
 
             foreach (var k in additionalHeaders)
             {
                 var lowK = k.ToLowerInvariant();
-
-                if (IsDefaultSignedHeader(lowK))
-                    continue;
-                else if (headers.ContainsKey(lowK)) keys.Add(lowK);
+                if (!IsDefaultSignedHeader(lowK) && headers.ContainsKey(lowK))
+                {
+                    keys.Add(lowK);
+                }
             }
 
             return keys;
@@ -324,16 +364,19 @@ namespace AlibabaCloud.OSS.V2.Signer
             Scope + "\n" +
             Hex(SHA256Hash(Canonical Request))
             */
+
+#if NET5_0_OR_GREATER
+            var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(canonicalRequest));
+#else
             using var hash = SHA256.Create();
             var hashBytes = hash.ComputeHash(Encoding.UTF8.GetBytes(canonicalRequest));
+#endif
 
-            return "OSS4-HMAC-SHA256" +
-                "\n" +
-                datetime +
-                "\n" +
-                scope +
-                "\n" +
-                ToHexString(hashBytes, true);
+            var hexStr = ToHexString(hashBytes, true);
+            return $"OSS4-HMAC-SHA256\n" +
+                $"{datetime}\n" +
+                $"{scope}\n" +
+                $"{hexStr}";
         }
 
         private static string CalcSignature(
@@ -344,25 +387,36 @@ namespace AlibabaCloud.OSS.V2.Signer
             string stringToSign
         )
         {
-            using var kha = new HMACSHA256();
-
             var ksecret = Encoding.UTF8.GetBytes("aliyun_v4" + accessKeySecret);
 
-            kha.Key = ksecret;
-            var hashDate = kha.ComputeHash(Encoding.UTF8.GetBytes(date));
+#if NET6_0_OR_GREATER
 
-            kha.Key = hashDate;
-            var hashRegion = kha.ComputeHash(Encoding.UTF8.GetBytes(region));
+            var hashDate = ComputeHash(ksecret, date);
+            var hashRegion = ComputeHash(hashDate, region);
+            var hashProduct = ComputeHash(hashRegion, product);
+            var signingKey = ComputeHash(hashProduct, "aliyun_v4_request");
+            var signature = ComputeHash(signingKey, stringToSign);
 
-            kha.Key = hashRegion;
-            var hashProduct = kha.ComputeHash(Encoding.UTF8.GetBytes(product));
+            static byte[] ComputeHash(byte[] key, string input)
+            {
+                var source = Encoding.UTF8.GetBytes(input);
+                return HMACSHA256.HashData(key, source);
+            }
+#else
+            using var kha = new HMACSHA256();
+            var hashDate = ComputeHash(kha, ksecret, date);
+            var hashRegion = ComputeHash(kha, hashDate, region);
+            var hashProduct = ComputeHash(kha, hashRegion, product);
+            var signingKey = ComputeHash(kha, hashProduct, "aliyun_v4_request");
+            var signature = ComputeHash(kha, signingKey, stringToSign);
 
-            kha.Key = hashProduct;
-            var signingKey = kha.ComputeHash(Encoding.UTF8.GetBytes("aliyun_v4_request"));
-
-            kha.Key = signingKey;
-            var signature = kha.ComputeHash(Encoding.UTF8.GetBytes(stringToSign));
-
+            static byte[] ComputeHash(HMACSHA256 hash, byte[] key, string input)
+            {
+                var source = Encoding.UTF8.GetBytes(input);
+                hash.Key = key;
+                return hash.ComputeHash(source);
+            }
+#endif
             //Console.WriteLine("ksecret:{0}\n", OssUtils.ToHexString(ksecret, true));
             //Console.WriteLine("hashDate:{0}\n", OssUtils.ToHexString(hashDate, true));
             //Console.WriteLine("hashRegion:{0}\n", OssUtils.ToHexString(hashRegion, true));
@@ -374,9 +428,47 @@ namespace AlibabaCloud.OSS.V2.Signer
 
         internal static string ToHexString(byte[] data, bool lowercase)
         {
-            var sb = new StringBuilder();
-            for (var i = 0; i < data.Length; i++) sb.Append(data[i].ToString(lowercase ? "x2" : "X2"));
+#if NET9_0_OR_GREATER
+            return lowercase ? Convert.ToHexStringLower(data) : Convert.ToHexString(data);
+#elif NET5_0_OR_GREATER
+            var hex = Convert.ToHexString(data);
+            return lowercase ? hex.ToLowerInvariant() : hex;
+#else
+            var sb = new StringBuilder(data.Length * 2);
+            var format = lowercase ? "x2" : "X2";
+            for (var i = 0; i < data.Length; i++) sb.Append(data[i].ToString(format));
             return sb.ToString();
+#endif
+        }
+
+        private static void AppendAsQueryUrl(StringBuilder sb, IEnumerable<KeyValuePair<string, string>> pairs, bool encoded)
+        {
+            if (encoded)
+            {
+                foreach (var item in pairs)
+                {
+                    sb.Append(item.Key);
+                    if (!item.Value.IsEmpty())
+                    {
+                        sb.Append('=').Append(item.Value).Append('&');
+                    }
+                }
+            }
+            else
+            {
+                foreach (var item in pairs)
+                {
+                    sb.Append(item.Key.UrlEncode());
+                    if (!item.Value.IsEmpty())
+                    {
+                        sb.Append('=').Append(item.Value.UrlEncode()).Append('&');
+                    }
+                }
+            }
+            if (sb[sb.Length - 1] == '&')
+            {
+                sb.Length--;
+            }
         }
     }
 }

@@ -2,7 +2,7 @@
     <Import Project="$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildProjectDirectory), 'alibabacloud-oss-csharp-sdk-v2.sln'))\props\Common.props"/>
     <PropertyGroup>
         <TargetFrameworks>netstandard2.0;net471;net48;net5.0;net8.0;net9.0</TargetFrameworks>
-        <LangVersion>9.0</LangVersion>
+        <LangVersion>12</LangVersion>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <PackageProjectUrl>https://github.com/aliyun/alibabacloud-oss-csharp-sdk-v2</PackageProjectUrl>
         <RepositoryUrl>https://github.com/aliyun/alibabacloud-oss-csharp-sdk-v2.git</RepositoryUrl>

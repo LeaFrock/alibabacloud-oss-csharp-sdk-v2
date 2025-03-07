@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Net;
 
@@ -12,7 +11,7 @@ namespace AlibabaCloud.OSS.V2.Extensions
         public static bool IsHostIp(this Uri uri)
         {
             return !string.IsNullOrEmpty(uri.Host) &&
-            uri.Host.IndexOf(".", StringComparison.InvariantCulture) >= 0 &&
+            uri.Host.Contains('.') &&
             IPAddress.TryParse(uri.Host, out _);
         }
 
@@ -56,7 +55,7 @@ namespace AlibabaCloud.OSS.V2.Extensions
             var query = uri.Query;
             if (!string.IsNullOrEmpty(query))
             {
-                if (query.StartsWith("?", true, CultureInfo.InvariantCulture))
+                if (query.StartsWith("?", StringComparison.InvariantCultureIgnoreCase))
                 {
                     query = query.Substring(1);
                 }

@@ -10,10 +10,17 @@ namespace AlibabaCloud.OSS.V2.Extensions
     internal static class StringExtensions
     {
 
-        public static string UrlDecode(this string input) => WebUtility.UrlDecode(input);
+        public static string UrlDecode(this string input)
+        {
+            // return Uri.UnescapeDataString(input);
+            return WebUtility.UrlDecode(input);
+        }
 
         public static string UrlEncode(this string input)
         {
+            // https://github.com/dotnet/runtime/issues/111114#issuecomment-2572542965
+            // https://github.com/dotnet/runtime/issues/45328#issuecomment-735654691
+            // return Uri.EscapeDataString(input);
             var encoded = WebUtility.UrlEncode(input);
             return encoded!.Replace("+", "%20");
         }
@@ -37,12 +44,13 @@ namespace AlibabaCloud.OSS.V2.Extensions
             if (string.IsNullOrEmpty(input))
                 return string.Empty;
             var encoded = new StringBuilder(input.Length * 2);
-            foreach (char symbol in Encoding.UTF8.GetBytes(input))
+            foreach (var @byte in Encoding.UTF8.GetBytes(input))
             {
+                var symbol = (char)@byte;
                 if (IsUrlSafeChar(symbol))
                     encoded.Append(symbol);
                 else
-                    encoded.Append("%").Append($"{(int)symbol:X2}");
+                    encoded.Append('%').Append($"{(int)symbol:X2}");
             }
             return encoded.ToString();
         }
@@ -51,9 +59,16 @@ namespace AlibabaCloud.OSS.V2.Extensions
 
         public static bool IsNotEmpty([NotNullWhen(true)] this string? value) => !string.IsNullOrWhiteSpace(value);
 
-        public static string JoinToString(this IEnumerable<string> strings, string separator) => string.Join(separator, strings);
+        public static string JoinToString(this IEnumerable<string> strings, char separator)
+#if NETCOREAPP2_0_OR_GREATER
+            => string.Join(separator, strings);
+#else
+            => string.Join(separator.ToString(), strings);
+#endif
 
-        public static string SafeString(this string? value) => value ?? "";
+        // public static string JoinToString(this IEnumerable<string> strings, string separator) => string.Join(separator, strings);
+
+        public static string SafeString(this string? value) => value ?? string.Empty;
 
         public static string AddScheme(this string input, bool disableSsl)
         {
@@ -102,14 +117,20 @@ namespace AlibabaCloud.OSS.V2.Extensions
             return null;
         }
 
-        private static Regex _bucketNameRegex = new Regex(@"^[a-z0-9-]+$");
+        private static Regex _bucketNameRegex = new(@"^[a-z0-9-]+$");
         public static bool IsValidBucketName(this string value)
         {
             if (value.Length < 3 || value.Length > 64) return false;
 
-            if (value.StartsWith("-")) return false;
+#if NETCOREAPP
+            if (value.StartsWith('-')) return false;
 
-            if (value.EndsWith("-")) return false;
+            if (value.EndsWith('-')) return false;
+#else
+            if (value.StartsWith("-", StringComparison.Ordinal)) return false;
+
+            if (value.EndsWith("-", StringComparison.Ordinal)) return false;
+#endif
 
             return _bucketNameRegex.IsMatch(value);
         }
