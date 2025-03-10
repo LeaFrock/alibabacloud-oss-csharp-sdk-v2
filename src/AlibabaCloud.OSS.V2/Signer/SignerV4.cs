@@ -76,7 +76,7 @@ namespace AlibabaCloud.OSS.V2.Signer
             parameters.Add("x-oss-credential", $"{credentials.AccessKeyId}/{scope}");
 
             if (additionalHeaders.Count > 0)
-                parameters.Add("x-oss-additional-headers", additionalHeaders.JoinToString(':'));
+                parameters.Add("x-oss-additional-headers", additionalHeaders.JoinToString(';')); 
 
             // update query 
             StringBuilder sb = new(64);
@@ -450,8 +450,9 @@ namespace AlibabaCloud.OSS.V2.Signer
                     sb.Append(item.Key);
                     if (!item.Value.IsEmpty())
                     {
-                        sb.Append('=').Append(item.Value).Append('&');
+                        sb.Append('=').Append(item.Value);
                     }
+                    sb.Append('&');
                 }
             }
             else
@@ -461,8 +462,9 @@ namespace AlibabaCloud.OSS.V2.Signer
                     sb.Append(item.Key.UrlEncode());
                     if (!item.Value.IsEmpty())
                     {
-                        sb.Append('=').Append(item.Value.UrlEncode()).Append('&');
+                        sb.Append('=').Append(item.Value.UrlEncode());
                     }
+                    sb.Append('&');
                 }
             }
             if (sb[sb.Length - 1] == '&')
